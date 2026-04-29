@@ -6,6 +6,8 @@ LAMMPS that adds dynamic bond formation/breaking via
 `fix bond/create/random` (random-partner bond formation) on top of
 LAMMPS' built-in `fix bond/create` and `fix bond/break`.
 
+**[View Interactive Demo Report](https://vivarium-collective.github.io/pbg-caspule/)** -- self-assembly polymerization, sticker–spacer condensation, and associative network turnover with a 3D bond-network viewer (atoms colored by type, bonds colored by type), Plotly time-series, final cluster-size distribution histograms, the LAMMPS input scripts that drove each run, and bigraph architecture diagrams.
+
 The wrapper drives any bond-aware LAMMPS or CASPULE build forward in
 time as a process-bigraph `Process`, and exposes the **live bond
 network** through dedicated PBG ports — bond list, formed/broken event
