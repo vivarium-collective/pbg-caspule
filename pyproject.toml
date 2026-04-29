@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pbg-caspule"
+version = "0.1.0"
+description = "Process-bigraph wrapper for CASPULE (a LAMMPS variant with dynamic bond formation/breaking)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "process-bigraph>=0.0.10",
+    "bigraph-schema",
+    "lammps",
+    "numpy",
+    "networkx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib", "bigraph-viz"]
+
+[tool.setuptools.packages.find]
+include = ["pbg_caspule*"]
