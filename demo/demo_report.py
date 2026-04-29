@@ -376,11 +376,28 @@ def generate_bigraph_image(cfg_entry):
 
 
 def build_pbg_document(cfg_entry):
-    """Trimmed PBG document for the JSON tree (script replaced by a placeholder)."""
+    """Full PBG document for the JSON tree, with the real LAMMPS script."""
     return make_caspule_document(
-        input_script=f'<...generated LAMMPS script for "{cfg_entry["id"]}"...>',
+        input_script=cfg_entry['script'],
         interval=cfg_entry['interval'],
     )
+
+
+def script_stats(script):
+    """Return a small summary of the script for the UI header."""
+    lines = script.splitlines()
+    n_total = sum(1 for ln in lines if ln.strip() and not ln.lstrip().startswith('#'))
+    n_atoms = sum(1 for ln in lines if ln.lstrip().startswith('create_atoms'))
+    n_bonds = sum(1 for ln in lines if ln.lstrip().startswith('create_bonds'))
+    n_fix = sum(1 for ln in lines if ln.lstrip().startswith('fix '))
+    return {
+        'lines': len(lines),
+        'effective_lines': n_total,
+        'create_atoms': n_atoms,
+        'create_bonds': n_bonds,
+        'fixes': n_fix,
+        'bytes': len(script),
+    }
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -490,6 +507,11 @@ def generate_html(sim_results, output_path):
             crosslink_label = 'Total bonds'
             crosslink_value = bonds1
 
+        # LAMMPS input script — escaped for HTML, displayed as <pre>
+        stats = script_stats(cfg['script'])
+        import html as _html
+        escaped_script = _html.escape(cfg['script'].strip('\n'))
+
         section = f'''
     <div class="sim-section" id="sim-{sid}">
       <div class="sim-header" style="border-left: 4px solid {cs['primary']};">
@@ -511,6 +533,20 @@ def generate_html(sim_results, output_path):
         <div class="metric"><span class="metric-label">Snapshots</span><span class="metric-value">{len(snapshots)}</span></div>
         <div class="metric"><span class="metric-label">Runtime</span><span class="metric-value">{runtime:.2f}s</span></div>
       </div>
+
+      <h3 class="subsection-title">LAMMPS Input Script</h3>
+      <details class="script-wrap" style="border-left: 3px solid {cs['primary']};">
+        <summary class="script-summary">
+          <span class="script-summary-label">Click to expand the full script the wrapper fed to LAMMPS</span>
+          <span class="script-summary-stats">
+            {stats['lines']} lines &middot;
+            {stats['create_atoms']} <code>create_atoms</code> &middot;
+            {stats['create_bonds']} <code>create_bonds</code> &middot;
+            {stats['fixes']} <code>fix</code>
+          </span>
+        </summary>
+        <pre class="script-pre"><code id="script-{sid}">{escaped_script}</code></pre>
+      </details>
 
       <h3 class="subsection-title">3D Bond Network Viewer</h3>
       <div class="viewer-wrap">
@@ -652,6 +688,22 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .json-tree { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;
               padding:1rem; max-height:500px; overflow-y:auto; font-family:'SF Mono',
               Menlo,Monaco,'Courier New',monospace; font-size:.78rem; line-height:1.5; }
+.script-wrap { background:#0f172a; border:1px solid #1e293b; border-radius:10px;
+               margin-bottom:1rem; overflow:hidden; }
+.script-wrap summary { padding:.7rem 1rem; cursor:pointer; user-select:none;
+                       display:flex; flex-wrap:wrap; gap:.6rem; align-items:center;
+                       justify-content:space-between; color:#e2e8f0; }
+.script-wrap summary:hover { background:#1e293b; }
+.script-wrap summary::marker { color:#64748b; }
+.script-summary-label { font-size:.85rem; font-weight:600; }
+.script-summary-stats { font-size:.72rem; color:#94a3b8; font-family:'SF Mono',Menlo,monospace; }
+.script-summary-stats code { background:#1e293b; padding:0 .25em; border-radius:3px;
+                              color:#cbd5e1; font-size:.95em; }
+.script-pre { background:#020617; color:#e2e8f0; padding:1rem 1.2rem;
+              max-height:420px; overflow:auto; margin:0;
+              font-family:'SF Mono',Menlo,Monaco,'Courier New',monospace;
+              font-size:.75rem; line-height:1.55; border-top:1px solid #1e293b; }
+.script-pre code { font-family:inherit; }
 .jt-key { color:#7c3aed; font-weight:600; }
 .jt-str { color:#059669; }
 .jt-num { color:#2563eb; }
