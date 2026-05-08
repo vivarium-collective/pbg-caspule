@@ -17,6 +17,13 @@ bond ports:
    simultaneously. Crosslinks reach a steady-state count with
    non-zero formation **and** breaking rates per step — the
    signature of an associative polymer.
+4. **Programmed atom removal** — same polymer self-assembly as #1,
+   but at a scheduled mid-run step we feed the new
+   `atoms_to_remove` input port a list of atom IDs taken from the
+   largest cluster. The wrapper issues `delete_atoms group ...` to
+   LAMMPS before the next integration window, and the bond-network
+   plot shows a sharp pruning event with no need for an external
+   composite.
 
 Each section gets a 3D viewer (atoms colored by type, bonds colored
 by type), Plotly time-series for bonds / events / energy / clusters,
@@ -256,6 +263,31 @@ CONFIGS = [
         'camera': [18.0, 12.0, 15.0],
         'box_center_offset': True,
     },
+    {
+        'id': 'pruning',
+        'title': 'Programmed Atom Removal',
+        'subtitle': (
+            'Mid-run pruning via the new <code>atoms_to_remove</code> input port'
+        ),
+        'description': (
+            'Same self-assembly polymerisation as experiment 1, but at '
+            'snapshot 15 the runner feeds the new <code>atoms_to_remove</code> '
+            'input port the IDs of every atom currently in the largest '
+            'cluster. The wrapper translates that into '
+            '<code>group ... id …; delete_atoms group …; group … delete</code> '
+            'and LAMMPS removes the atoms (and their bonds) before the next '
+            'integration window. The bonds and clusters time-series shows '
+            'a single sharp drop at t = 3.0 — the wrapper-level proof that '
+            'the new input port works without needing a Composite.'
+        ),
+        'script': build_polymerization_script(box=8.0, n_atoms=320, seed=24680),
+        'n_snapshots': 30,
+        'interval': 0.2,
+        'color_scheme': 'amber',
+        'camera': [11.0, 4.0, 11.0],
+        'box_center_offset': True,
+        'prune_at_step': 15,
+    },
 ]
 
 
@@ -263,6 +295,7 @@ COLOR_SCHEMES = {
     'indigo': {'primary': '#6366f1', 'light': '#e0e7ff', 'dark': '#4338ca'},
     'emerald': {'primary': '#10b981', 'light': '#d1fae5', 'dark': '#059669'},
     'rose': {'primary': '#f43f5e', 'light': '#ffe4e6', 'dark': '#e11d48'},
+    'amber': {'primary': '#d97706', 'light': '#fef3c7', 'dark': '#b45309'},
 }
 
 
@@ -272,7 +305,14 @@ COLOR_SCHEMES = {
 
 
 def run_simulation(cfg_entry):
-    """Run a single simulation; return snapshots and wall-clock runtime."""
+    """Run a single simulation; return snapshots and wall-clock runtime.
+
+    Honors the optional ``prune_at_step`` config: at that step we feed
+    the wrapper's new ``atoms_to_remove`` input port the IDs of every
+    atom currently in the largest cluster, exercising the
+    `delete_atoms group ...` path inside ``CASPULEProcess`` directly
+    (no Composite required).
+    """
     core = allocate_core()
     core.register_link('CASPULEProcess', CASPULEProcess)
 
@@ -281,15 +321,58 @@ def run_simulation(cfg_entry):
     state0 = proc.initial_state()
 
     snapshots = [_snap(0.0, state0)]
+    last = state0
     t = 0.0
-    for _ in range(cfg_entry['n_snapshots']):
-        result = proc.update({}, interval=cfg_entry['interval'])
+    prune_step = cfg_entry.get('prune_at_step')
+    pruning_event = None
+    for step in range(cfg_entry['n_snapshots']):
+        atoms_to_remove = []
+        if prune_step is not None and step == prune_step:
+            atoms_to_remove = _atom_ids_in_largest_cluster(last)
+            pruning_event = {
+                'step': step,
+                'time': round(t + cfg_entry['interval'], 4),
+                'count': len(atoms_to_remove),
+            }
+        result = proc.update(
+            {'atoms_to_remove': atoms_to_remove},
+            interval=cfg_entry['interval'])
         t += cfg_entry['interval']
         snapshots.append(_snap(round(t, 4), result))
+        last = result
 
     runtime = time.perf_counter() - t0
     proc.close()
-    return snapshots, runtime
+    return snapshots, runtime, pruning_event
+
+
+def _atom_ids_in_largest_cluster(state):
+    """Return atom IDs in the largest connected component of the bond graph."""
+    bonds = state.get('bonds') or []
+    if not bonds:
+        return []
+    adj = {}
+    for triple in bonds:
+        _btype, a, b = int(triple[0]), int(triple[1]), int(triple[2])
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    visited = set()
+    largest = []
+    for start in list(adj.keys()):
+        if start in visited:
+            continue
+        component = []
+        stack = [start]
+        while stack:
+            x = stack.pop()
+            if x in visited:
+                continue
+            visited.add(x)
+            component.append(x)
+            stack.extend(adj.get(x, []))
+        if len(component) > len(largest):
+            largest = component
+    return sorted(largest)
 
 
 def _snap(t, s):
@@ -328,7 +411,9 @@ def generate_bigraph_image(cfg_entry):
             'address': 'local:CASPULEProcess',
             'config': {'input_script': '<script>'},
             'interval': cfg_entry['interval'],
-            'inputs': {},
+            'inputs': {
+                'atoms_to_remove': ['stores', 'atoms_to_remove'],
+            },
             'outputs': {
                 'num_bonds': ['stores', 'num_bonds'],
                 'bonds_by_type': ['stores', 'bonds_by_type'],
@@ -431,7 +516,7 @@ def generate_html(sim_results, output_path):
     sections_html = []
     js_data = {}
 
-    for idx, (cfg, (snapshots, runtime)) in enumerate(sim_results):
+    for idx, (cfg, (snapshots, runtime, pruning_event)) in enumerate(sim_results):
         sid = cfg['id']
         cs = COLOR_SCHEMES[cfg['color_scheme']]
         first = snapshots[0]
@@ -512,6 +597,15 @@ def generate_html(sim_results, output_path):
         import html as _html
         escaped_script = _html.escape(cfg['script'].strip('\n'))
 
+        prune_metric = ''
+        if pruning_event:
+            prune_metric = (
+                f'<div class="metric"><span class="metric-label">Pruned</span>'
+                f'<span class="metric-value">{pruning_event["count"]}</span>'
+                f'<span class="metric-sub">at t = {pruning_event["time"]}</span>'
+                f'</div>'
+            )
+
         section = f'''
     <div class="sim-section" id="sim-{sid}">
       <div class="sim-header" style="border-left: 4px solid {cs['primary']};">
@@ -524,12 +618,14 @@ def generate_html(sim_results, output_path):
       <p class="sim-description">{cfg['description']}</p>
 
       <div class="metrics-row">
-        <div class="metric"><span class="metric-label">Atoms</span><span class="metric-value">{first['num_atoms']:,}</span></div>
+        <div class="metric"><span class="metric-label">Atoms (start)</span><span class="metric-value">{first['num_atoms']:,}</span></div>
+        <div class="metric"><span class="metric-label">Atoms (end)</span><span class="metric-value">{last['num_atoms']:,}</span></div>
         <div class="metric"><span class="metric-label">Bonds (start &rarr; end)</span><span class="metric-value">{bonds0} &rarr; {bonds1}</span></div>
         <div class="metric"><span class="metric-label">{crosslink_label}</span><span class="metric-value">{crosslink_value}</span></div>
         <div class="metric"><span class="metric-label">Formed (total)</span><span class="metric-value">{formed_total}</span></div>
         <div class="metric"><span class="metric-label">Broken (total)</span><span class="metric-value">{broken_total}</span></div>
         <div class="metric"><span class="metric-label">Final clusters</span><span class="metric-value">{last['num_clusters']}</span><span class="metric-sub">largest = {last['largest_cluster']}</span></div>
+        {prune_metric}
         <div class="metric"><span class="metric-label">Snapshots</span><span class="metric-value">{len(snapshots)}</span></div>
         <div class="metric"><span class="metric-label">Runtime</span><span class="metric-value">{runtime:.2f}s</span></div>
       </div>
@@ -731,9 +827,14 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
   process-bigraph Process. The wrapper queries the live bond list at every
   update step and reports it through dedicated PBG ports: the bond list,
   per-type counts, formed/broken event counts, bond energy, and
-  connected-component cluster sizes. The three experiments below show
-  the wrapper driving polymer self-assembly, sticker-spacer condensation,
-  and steady-state associative bond turnover.</p>
+  connected-component cluster sizes. It also accepts an
+  <code>atoms_to_remove</code> input port: any list of LAMMPS atom IDs
+  written to that store before an update is deleted (with their bonds)
+  via <code>group … id …; delete_atoms group …</code> in the next
+  integration window. The four experiments below show polymer
+  self-assembly, sticker-spacer condensation, steady-state associative
+  bond turnover, and a programmed mid-run pruning event that exercises
+  the new input port.</p>
 </div>
 
 <div class="nav">__NAV_ITEMS__</div>
@@ -1078,13 +1179,18 @@ def run_demo():
     sim_results = []
     for cfg in CONFIGS:
         print(f'Running: {cfg["title"]}...')
-        snapshots, runtime = run_simulation(cfg)
-        sim_results.append((cfg, (snapshots, runtime)))
+        snapshots, runtime, pruning_event = run_simulation(cfg)
+        sim_results.append((cfg, (snapshots, runtime, pruning_event)))
         last = snapshots[-1]
         bt = last['bonds_by_type']
+        extra = ''
+        if pruning_event:
+            extra = (f' | pruned {pruning_event["count"]} atoms at '
+                     f't={pruning_event["time"]}')
         print(f'  Runtime: {runtime:.2f}s | snapshots: {len(snapshots)} | '
               f'final bonds: {last["num_bonds"]} (by type: {bt}) | '
-              f'clusters: {last["num_clusters"]}, largest: {last["largest_cluster"]}')
+              f'clusters: {last["num_clusters"]}, largest: '
+              f'{last["largest_cluster"]}{extra}')
 
     print('Generating HTML report...')
     generate_html(sim_results, output_path)
