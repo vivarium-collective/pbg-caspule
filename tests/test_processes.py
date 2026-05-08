@@ -179,6 +179,41 @@ def test_missing_input_raises(core):
         proc.initial_state()
 
 
+def test_atoms_to_remove_deletes_named_atoms(core):
+    """Passing atoms_to_remove=[2,3] should delete two atoms and one bond
+    each at both ends of the missing pair (chain becomes 1-?-4-5 → atoms
+    {1,4,5} with one bond 4-5). Connectivity stats should reflect this."""
+    proc = CASPULEProcess(config={'input_script': STATIC_CHAIN_SCRIPT}, core=core)
+    proc.initial_state()
+    out = proc.update({'atoms_to_remove': [2, 3]}, interval=0.01)
+    assert out['num_atoms'] == 3
+    remaining = {(b[1], b[2]) for b in out['bonds']}
+    assert remaining == {(4, 5)}
+    assert out['num_bonds'] == 1
+    proc.close()
+
+
+def test_atoms_to_remove_empty_is_noop(core):
+    """Empty atoms_to_remove must not perturb the simulation."""
+    proc = CASPULEProcess(config={'input_script': STATIC_CHAIN_SCRIPT}, core=core)
+    proc.initial_state()
+    out = proc.update({'atoms_to_remove': []}, interval=0.01)
+    assert out['num_atoms'] == 5
+    assert out['num_bonds'] == 4
+    proc.close()
+
+
+def test_atoms_to_remove_skips_already_removed(core):
+    """Re-issuing the same removal list on a later step is a no-op
+    (already-deleted IDs are silently skipped, never raise)."""
+    proc = CASPULEProcess(config={'input_script': STATIC_CHAIN_SCRIPT}, core=core)
+    proc.initial_state()
+    proc.update({'atoms_to_remove': [3]}, interval=0.01)
+    out = proc.update({'atoms_to_remove': [3]}, interval=0.01)
+    assert out['num_atoms'] == 4  # still gone, not an error
+    proc.close()
+
+
 def test_cluster_max_atoms_disables_computation(core):
     proc = CASPULEProcess(
         config={'input_script': STATIC_CHAIN_SCRIPT, 'cluster_max_atoms': 1},

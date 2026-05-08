@@ -55,9 +55,17 @@ class CASPULEProcess(Process):
         self._dt = None
         self._prev_num_bonds = 0
         self._prev_bond_set = set()
+        self._delete_group_seq = 0
 
     def inputs(self):
-        return {}
+        # `atoms_to_remove` lets a coupled Step (e.g. an observable detector)
+        # request that LAMMPS delete a set of atoms by global ID before the
+        # next integration window. The list is consumed authoritatively each
+        # tick: the producer must write a fresh list (possibly empty) every
+        # time, so previously-deleted IDs aren't retried.
+        return {
+            'atoms_to_remove': 'overwrite[list]',
+        }
 
     def outputs(self):
         return {
@@ -253,8 +261,48 @@ class CASPULEProcess(Process):
         _, _, self._prev_bond_set, _ = self._read_bonds()
         return self._read_state()
 
+    def _delete_atoms(self, atom_ids):
+        """Issue `delete_atoms id ...` for the given global IDs.
+
+        Skips IDs that no longer exist in LAMMPS (already-deleted atoms
+        produce a hard error otherwise). Bonds attached to deleted atoms
+        are removed automatically by LAMMPS.
+        """
+        if not atom_ids:
+            return
+        # Filter to currently-resident IDs. extract_atom('id') returns
+        # nlocal IDs on this rank; for the serial bridge that's all of
+        # them. Skip duplicates and non-positive entries.
+        nlocal = self._lmp.extract_setting('nlocal')
+        live = set(int(i) for i in self._lmp.numpy.extract_atom('id')[:nlocal])
+        keep = sorted({int(i) for i in atom_ids if int(i) in live})
+        if not keep:
+            return
+        ids_str = ' '.join(str(i) for i in keep)
+        # Older LAMMPS builds lack `delete_atoms id`, so we route through
+        # a per-call temporary group: `group <gid> id ...` then
+        # `delete_atoms group <gid>`. Each group has a unique name so
+        # repeated removals don't collide. `compress no` keeps atom IDs
+        # stable across deletions; `bond yes` clears neighbor lists.
+        self._delete_group_seq += 1
+        gid = f'_pbg_del_{self._delete_group_seq}'
+        self._lmp.command(f'group {gid} id {ids_str}')
+        self._lmp.command(f'delete_atoms group {gid} compress no bond yes')
+        self._lmp.command(f'group {gid} delete')
+        # The bookkeeping bond set is keyed by atom IDs, so prune any
+        # entries that referenced removed atoms.
+        removed = set(keep)
+        self._prev_bond_set = {
+            (a, b) for (a, b) in self._prev_bond_set
+            if a not in removed and b not in removed
+        }
+
     def update(self, state, interval):
         self._build_simulation()
+
+        atoms_to_remove = state.get('atoms_to_remove') if state else None
+        if atoms_to_remove:
+            self._delete_atoms(atoms_to_remove)
 
         n_steps = max(1, int(round(interval / self._dt)))
 
