@@ -63,11 +63,15 @@ SCALAR_EMIT_TYPES = {
 
 
 def register_caspule(core=None):
-    """Return a core with CASPULEProcess and the RAM emitter registered."""
+    """Return a core with CASPULEProcess, the RAM emitter, and the bond-network
+    Visualization registered."""
     if core is None:
         core = allocate_core()
     core.register_link('CASPULEProcess', CASPULEProcess)
     core.register_link('ram-emitter', RAMEmitter)
+    # Register Visualization Steps so composites can wire them by name.
+    from pbg_caspule.visualizations import BondNetworkPlots
+    core.register_link('BondNetworkPlots', BondNetworkPlots)
     return core
 
 

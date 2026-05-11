@@ -32,17 +32,23 @@ from pbg_caspule.composites import (
 
 
 def run(spec_name: str, n_steps: int = 20, interval: float | None = None):
-    """Build the composite, step it n_steps times, return collected results."""
+    """Build the composite, step it n_steps times, return collected results.
+
+    Also extracts the latest 'viz_html' store value (if the composite wires
+    a Visualization Step to a store named 'viz_html'), so the report can
+    embed the live figure produced by the running simulation.
+    """
     sim = build_composite(spec_name)
     spec = load_composite_spec(spec_name)
-    # Use the spec's declared interval (overridable) for stepping
     step_interval = float(interval if interval is not None else
                            (spec.get("parameters") or {})
                            .get("interval", {}).get("default", 1.0))
     for _ in range(n_steps):
         sim.update({}, step_interval)
     results = gather_emitter_results(sim)
-    return spec, results, step_interval
+    state = sim.state.get("state", sim.state)
+    viz_html = (state.get("stores") or {}).get("viz_html", "")
+    return spec, results, step_interval, viz_html
 
 
 def _bigraph_png(spec: dict) -> str:
@@ -63,7 +69,7 @@ def _bigraph_png(spec: dict) -> str:
 
 
 def render_html(spec: dict, results: dict, step_interval: float,
-                spec_path: str) -> str:
+                spec_path: str, viz_html: str = "") -> str:
     """Return a self-contained HTML report for the run."""
     # Flatten the first emitter's rows into time-series
     rows = next(iter(results.values()), [])
@@ -88,6 +94,13 @@ def render_html(spec: dict, results: dict, step_interval: float,
         if arch_img else "<em>bigraph-viz not installed; skipping diagram</em>"
     )
 
+    viz_block = (
+        f'<h2>Visualization Step output</h2>'
+        f'<p class="lead">Live HTML produced by the wired <code>Visualization</code> Step '
+        f'(consumes per-step state, accumulates internally, renders Plotly each update).</p>'
+        f'<div style="border:1px solid #e2e8f0;border-radius:6px;padding:1rem">{viz_html}</div>'
+    ) if viz_html else ""
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <title>{spec.get('name', spec_path)}</title>
@@ -110,7 +123,9 @@ def render_html(spec: dict, results: dict, step_interval: float,
   <p><small>Source: <code>{spec_path}</code> · {len(rows)} emitter rows ·
      interval {step_interval}</small></p>
 
-  <h2>Scalar trajectories</h2>
+  {viz_block}
+
+  <h2>Emitter time-series</h2>
   <div id="chart"></div>
   <script>
     Plotly.newPlot('chart', [{','.join(traces_js)}], {{
@@ -143,9 +158,9 @@ def main(spec_name: str | None = None, n_steps: int = 20,
         spec_name = specs[0]
 
     print(f"Running composite '{spec_name}' for {n_steps} steps...")
-    spec, results, step_interval = run(spec_name, n_steps=n_steps)
+    spec, results, step_interval, viz_html = run(spec_name, n_steps=n_steps)
     spec_path = str(_COMPOSITES_DIR / f"{spec_name}.composite.yaml")
-    html = render_html(spec, results, step_interval, spec_path)
+    html = render_html(spec, results, step_interval, spec_path, viz_html=viz_html)
 
     if output_path is None:
         output_path = os.path.join(
