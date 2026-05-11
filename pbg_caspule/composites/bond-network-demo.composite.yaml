@@ -1,0 +1,72 @@
+name: bond-network-demo
+description: "Tiny CASPULE / LAMMPS bond-network demo: three bonded atoms under a Langevin thermostat. Emits temperature, total_energy, num_bonds, and bond_energy each step."
+
+requires:
+  processes: [CASPULEProcess, RAMEmitter]
+
+parameters:
+  interval:
+    type: float
+    default: 0.05
+    description: "Process interval in LAMMPS time units. The bridge issues `run N` calls sized to fit this window."
+  cluster_max_atoms:
+    type: int
+    default: 200000
+    description: "Skip connected-component cluster computation when system size exceeds this. Default is plenty for the 3-atom demo."
+
+state:
+  caspule:
+    _type: process
+    address: "local:CASPULEProcess"
+    config:
+      input_script: |
+        units lj
+        atom_style bond
+        boundary p p p
+        neighbor 0.4 bin
+        neigh_modify every 1 delay 0
+        region box block 0 8 0 8 0 8
+        create_box 1 box bond/types 1 extra/bond/per/atom 4
+        mass 1 1.0
+        create_atoms 1 single 1.0 4.0 4.0
+        create_atoms 1 single 2.0 4.0 4.0
+        create_atoms 1 single 3.0 4.0 4.0
+        create_bonds single/bond 1 1 2
+        create_bonds single/bond 1 2 3
+        pair_style lj/cut 1.5
+        pair_coeff * * 1.0 1.0 1.5
+        bond_style harmonic
+        bond_coeff 1 100.0 1.0
+        fix nve all nve
+        fix lan all langevin 0.4 0.4 1.0 12345
+        timestep 0.005
+        thermo 1
+      cluster_max_atoms: "${cluster_max_atoms}"
+    inputs:
+      atoms_to_remove: ["stores", "atoms_to_remove"]
+    outputs:
+      temperature: ["stores", "temperature"]
+      total_energy: ["stores", "total_energy"]
+      num_bonds: ["stores", "num_bonds"]
+      bond_energy: ["stores", "bond_energy"]
+    interval: "${interval}"
+  stores:
+    atoms_to_remove: []
+    temperature: 0.0
+    total_energy: 0.0
+    num_bonds: 0
+    bond_energy: 0.0
+  emitter:
+    _type: step
+    address: "local:RAMEmitter"
+    config:
+      emit:
+        temperature: "float"
+        total_energy: "float"
+        num_bonds: "integer"
+        bond_energy: "float"
+    inputs:
+      temperature: ["stores", "temperature"]
+      total_energy: ["stores", "total_energy"]
+      num_bonds: ["stores", "num_bonds"]
+      bond_energy: ["stores", "bond_energy"]
