@@ -1,5 +1,6 @@
 name: bond-network-demo
 description: "Tiny CASPULE / LAMMPS bond-network demo: three bonded atoms under a Langevin thermostat. Emits temperature, total_energy, num_bonds, and bond_energy each step."
+tags: [polymers, molecular-dynamics, demo]
 
 requires:
   processes: [CASPULEProcess, RAMEmitter]

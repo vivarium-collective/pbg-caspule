@@ -1,5 +1,6 @@
 name: bond-network-with-viz
 description: "CASPULE bond-network demo with a wired Visualization Step. Each update produces a Plotly HTML figure of the running scalar trajectories, written to the 'viz_html' store."
+tags: [polymers, molecular-dynamics, demo, visualization]
 
 requires:
   processes: [CASPULEProcess, BondNetworkPlots, RAMEmitter]
