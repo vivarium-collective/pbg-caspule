@@ -70,8 +70,9 @@ def register_caspule(core=None):
     core.register_link('CASPULEProcess', CASPULEProcess)
     core.register_link('ram-emitter', RAMEmitter)
     # Register Visualization Steps so composites can wire them by name.
-    from pbg_caspule.visualizations import BondNetworkPlots
+    from pbg_caspule.visualizations import BondNetworkPlots, BondNetwork3D
     core.register_link('BondNetworkPlots', BondNetworkPlots)
+    core.register_link('BondNetwork3D', BondNetwork3D)
     return core
 
 

@@ -1,9 +1,9 @@
 name: bond-network-with-viz
-description: "CASPULE bond-network demo with a wired Visualization Step. Each update produces a Plotly HTML figure of the running scalar trajectories, written to the 'viz_html' store."
+description: "CASPULE bond-network demo with wired Visualization Steps. Each update produces a Plotly HTML figure of the running scalar trajectories (BondNetworkPlots) and a three.js orbitable 3D viewer of atom positions + bonds (BondNetwork3D), each written to its own store."
 tags: [polymers, molecular-dynamics, demo, visualization]
 
 requires:
-  processes: [CASPULEProcess, BondNetworkPlots, RAMEmitter]
+  processes: [CASPULEProcess, BondNetworkPlots, BondNetwork3D, RAMEmitter]
 
 parameters:
   interval:
@@ -14,6 +14,10 @@ parameters:
     type: string
     default: "CASPULE bond network"
     description: "Title displayed at the top of the Plotly figure."
+  viz_3d_title:
+    type: string
+    default: "CASPULE atoms and bonds"
+    description: "Title for the three.js 3D atom/bond viewer."
 
 state:
   caspule:
@@ -49,6 +53,9 @@ state:
       total_energy: ["stores", "total_energy"]
       num_bonds: ["stores", "num_bonds"]
       bond_energy: ["stores", "bond_energy"]
+      positions: ["stores", "positions"]
+      atom_types: ["stores", "atom_types"]
+      bonds: ["stores", "bonds"]
     interval: "${interval}"
   stores:
     atoms_to_remove: []
@@ -56,7 +63,11 @@ state:
     total_energy: 0.0
     num_bonds: 0
     bond_energy: 0.0
+    positions: []
+    atom_types: []
+    bonds: []
     viz_html: ""
+    viz_3d_html: ""
   viz:
     _type: step
     address: "local:BondNetworkPlots"
@@ -70,6 +81,17 @@ state:
       time: ["global_time"]
     outputs:
       html: ["stores", "viz_html"]
+  viz_bond_3d:
+    _type: step
+    address: "local:BondNetwork3D"
+    config:
+      title: "${viz_3d_title}"
+    inputs:
+      positions: ["stores", "positions"]
+      types: ["stores", "atom_types"]
+      bonds: ["stores", "bonds"]
+    outputs:
+      html: ["stores", "viz_3d_html"]
   emitter:
     _type: step
     address: "local:RAMEmitter"

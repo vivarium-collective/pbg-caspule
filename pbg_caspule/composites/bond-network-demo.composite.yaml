@@ -1,9 +1,9 @@
 name: bond-network-demo
-description: "Tiny CASPULE / LAMMPS bond-network demo: three bonded atoms under a Langevin thermostat. Emits temperature, total_energy, num_bonds, and bond_energy each step."
-tags: [polymers, molecular-dynamics, demo]
+description: "Tiny CASPULE / LAMMPS bond-network demo: three bonded atoms under a Langevin thermostat. Emits temperature, total_energy, num_bonds, and bond_energy each step, and bundles two Visualization Steps: BondNetworkPlots (Plotly time-series) and BondNetwork3D (three.js orbitable atom/bond viewer)."
+tags: [polymers, molecular-dynamics, demo, visualization]
 
 requires:
-  processes: [CASPULEProcess, RAMEmitter]
+  processes: [CASPULEProcess, BondNetworkPlots, BondNetwork3D, RAMEmitter]
 
 parameters:
   interval:
@@ -14,6 +14,14 @@ parameters:
     type: int
     default: 200000
     description: "Skip connected-component cluster computation when system size exceeds this. Default is plenty for the 3-atom demo."
+  viz_title:
+    type: string
+    default: "CASPULE bond network"
+    description: "Title for the Plotly time-series figure."
+  viz_3d_title:
+    type: string
+    default: "CASPULE atoms and bonds"
+    description: "Title for the three.js 3D atom/bond viewer."
 
 state:
   caspule:
@@ -50,6 +58,9 @@ state:
       total_energy: ["stores", "total_energy"]
       num_bonds: ["stores", "num_bonds"]
       bond_energy: ["stores", "bond_energy"]
+      positions: ["stores", "positions"]
+      atom_types: ["stores", "atom_types"]
+      bonds: ["stores", "bonds"]
     interval: "${interval}"
   stores:
     atoms_to_remove: []
@@ -57,6 +68,35 @@ state:
     total_energy: 0.0
     num_bonds: 0
     bond_energy: 0.0
+    positions: []
+    atom_types: []
+    bonds: []
+    viz_html: ""
+    viz_3d_html: ""
+  viz:
+    _type: step
+    address: "local:BondNetworkPlots"
+    config:
+      title: "${viz_title}"
+    inputs:
+      temperature: ["stores", "temperature"]
+      total_energy: ["stores", "total_energy"]
+      num_bonds: ["stores", "num_bonds"]
+      bond_energy: ["stores", "bond_energy"]
+      time: ["global_time"]
+    outputs:
+      html: ["stores", "viz_html"]
+  viz_bond_3d:
+    _type: step
+    address: "local:BondNetwork3D"
+    config:
+      title: "${viz_3d_title}"
+    inputs:
+      positions: ["stores", "positions"]
+      types: ["stores", "atom_types"]
+      bonds: ["stores", "bonds"]
+    outputs:
+      html: ["stores", "viz_3d_html"]
   emitter:
     _type: step
     address: "local:RAMEmitter"
